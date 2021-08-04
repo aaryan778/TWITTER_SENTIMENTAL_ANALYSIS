@@ -16,8 +16,8 @@
 - [Full workflow to perform sentiment analysis on Twitter data](#Full-workflow-to-perform-sentiment-analysis-on-Twitter-data)
 - [Description and purpose of the python files](#Description-and-purpose-of-the-python-files)
     - [Step 1 – Creating Twitter Application](#step-1–creating-twitter-application)
-    - [Step 2 - Accessing Twitter Public Data](#step-2-accessingtTwitter-public-data)
-    - [Step 3 - Pre-processing](#step-3-pre-processing)
+    - [Step 2 – Accessing Twitter Public Data](#step-2-accessingtTwitter-public-data)
+    - [Step 3 – Pre-processing](#step-3-pre-processing)
 - [Screenshots](#Screenshots)
 - [References](#References)
 
