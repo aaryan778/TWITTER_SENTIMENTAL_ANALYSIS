@@ -153,15 +153,15 @@ It contains scripts to:
 
 ![CommandLineOutput](/images/1output.png)
 
-![GraphLikesRetweets](/TWITTER_SENTIMENTAL_ANALYSIS/images/2output.png)
+![GraphLikesRetweets](/images/2output.png)
 
-![WordCloud](/TWITTER_SENTIMENTAL_ANALYSIS/images/3.png)
+![WordCloud](/images/3.png)
 
-![TopWordsOfScreenName](/TWITTER_SENTIMENTAL_ANALYSIS/images/4output.png)
+![TopWordsOfScreenName](images/4output.png)
 
-![TopOrganizationsinTweets](/TWITTER_SENTIMENTAL_ANALYSIS/images/5output.png)
+![TopOrganizationsinTweets](/images/5output.png)
 
-![TopPeopleMentioned](/TWITTER_SENTIMENTAL_ANALYSIS/images/6output.png)
+![TopPeopleMentioned](/images/6output.png)
 
 # References:
 https://www.degruyter.com/document/doi/10.1515/jisys-2019-0106 <br>
