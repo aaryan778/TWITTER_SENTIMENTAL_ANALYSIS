@@ -11,8 +11,8 @@
 - [Prerequisites](#Prerequisites)
 - [Twitter Developer Account Setup](#Twitter-Developer-Account-Setup)
 - [Python Download](#Python-Download)
-- [IDE/Text Editor](#IDE/Text-Editor)
-- [Install - local](#Install-local)
+- [IDE/TextEditor](#IDE/Text-Editor)
+- [Install-local](#Install-local)
 - [Full workflow to perform sentiment analysis on Twitter data](#Full-workflow-to-perform-sentiment-analysis-on-Twitter-data)
 - [Description and purpose of the python files](#Description-and-purpose-of-the-python-files)
     - [Step 1 – Creating Twitter Application](#Step1–Creating-Twitter-Application)
@@ -151,7 +151,7 @@ It contains scripts to:
 
 # Screenshots
 
-![CommandLineOutput](/TWITTER_SENTIMENTAL_ANALYSIS/images/1output.png)
+![CommandLineOutput](/images/1output.png)
 
 ![GraphLikesRetweets](/TWITTER_SENTIMENTAL_ANALYSIS/images/2output.png)
 
