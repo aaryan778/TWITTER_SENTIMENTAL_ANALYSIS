@@ -49,10 +49,12 @@ def load_state() -> dict:
     return {
         "incident_counter": 0,
         "last_pr_id": 0,
+        "last_issue_check": None,   # ISO timestamp — issue polling watermark
         "github_project_id": None,
         "github_project_number": None,
         "sprint_name": None,
-        "sprint_fields": {},   # field_id -> {name, options: {name: option_id}}
+        "sprint_fields": {},        # field_name -> {id, options: {option_name: option_id}}
+        "issue_items": {},          # str(issue_number) -> project_item_id
     }
 
 
@@ -208,11 +210,64 @@ async def close_github_issue(issue_number: int):
 
 
 async def get_open_issues() -> list:
-    return await gh_rest("GET", f"/repos/{GITHUB_REPO}/issues?state=open&per_page=50")
+    result = await gh_rest("GET", f"/repos/{GITHUB_REPO}/issues?state=open&per_page=50")
+    return result if isinstance(result, list) else []
+
+
+async def get_issues_since(since_iso: str) -> list:
+    """Returns all issues (open + closed) updated since the given ISO timestamp."""
+    result = await gh_rest(
+        "GET",
+        f"/repos/{GITHUB_REPO}/issues?state=all&per_page=50&since={since_iso}&sort=updated&direction=asc"
+    )
+    return result if isinstance(result, list) else []
 
 
 async def get_open_prs() -> list:
-    return await gh_rest("GET", f"/repos/{GITHUB_REPO}/pulls?state=open&per_page=20")
+    result = await gh_rest("GET", f"/repos/{GITHUB_REPO}/pulls?state=open&per_page=20")
+    return result if isinstance(result, list) else []
+
+
+# Maps bot status labels → GitHub Projects V2 "Status" field option names
+STATUS_TO_PROJECT = {
+    "backlog":     "Todo",
+    "in-progress": "In Progress",
+    "in-review":   "In Progress",   # Projects default has no "In Review"; maps to In Progress
+    "done":        "Done",
+}
+
+
+async def sync_issue_status_to_project(issue_number: int, new_status: str):
+    """Update the GitHub Projects Kanban card for the given issue."""
+    project_id = state.get("github_project_id")
+    if not project_id:
+        return
+
+    item_id = state.get("issue_items", {}).get(str(issue_number))
+    if not item_id:
+        return  # issue was not added to the project board
+
+    fields = state.get("sprint_fields", {})
+    status_field = fields.get("Status")
+    if not status_field:
+        # Refresh fields from GitHub
+        refreshed = await get_project_fields(project_id)
+        state["sprint_fields"] = refreshed
+        save_state(state)
+        status_field = refreshed.get("Status")
+    if not status_field:
+        return
+
+    option_name = STATUS_TO_PROJECT.get(new_status.lower())
+    if not option_name:
+        return
+    option_id = status_field.get("options", {}).get(option_name)
+    if not option_id:
+        return
+
+    await update_project_item_status(
+        project_id, item_id, status_field["id"], option_id
+    )
 
 
 async def ensure_label_exists(label: str):
@@ -498,9 +553,29 @@ async def task_create(
     issue_url  = issue.get("html_url", "")
     issue_node = issue.get("node_id", "")
 
-    # Add to GitHub Project
+    # If GitHub returned an error (e.g. invalid assignee), report it clearly
+    if not issue_num:
+        err_msg = issue.get("message", "Unknown error")
+        errors  = "; ".join(
+            e.get("message", "") for e in issue.get("errors", [])
+        )
+        await interaction.followup.send(
+            f"❌ **GitHub rejected the task.**\n"
+            f"Error: {err_msg}\n"
+            f"{('Details: ' + errors) if errors else ''}\n\n"
+            f"Common cause: assignee GitHub username does not exist or has no access to this repo.\n"
+            f"Try again without `assign:` or fix the username."
+        )
+        return
+
+    # Add to GitHub Project and store the item ID for Kanban sync
     if state.get("github_project_id") and issue_node:
-        await add_issue_to_project(state["github_project_id"], issue_node)
+        item_id = await add_issue_to_project(state["github_project_id"], issue_node)
+        if item_id:
+            if "issue_items" not in state:
+                state["issue_items"] = {}
+            state["issue_items"][str(issue_num)] = item_id
+            save_state(state)
 
     await interaction.followup.send(
         f"✅ **Task #{issue_num} created**\n"
@@ -581,6 +656,13 @@ async def task_status(
         "PATCH", f"/repos/{GITHUB_REPO}/issues/{issue_number}",
         json={"labels": current_labels}
     )
+
+    # Sync status to GitHub Projects Kanban board
+    await sync_issue_status_to_project(issue_number, new_status)
+
+    # If status is "done", also close the GitHub issue
+    if new_status.lower() == "done":
+        await close_github_issue(issue_number)
 
     status_emoji = {"in-progress": "🔄", "in-review": "👀",
                     "done": "✅", "backlog": "📋"}.get(new_status.lower(), "📋")
@@ -894,6 +976,70 @@ async def poll_github_prs():
             await asyncio.sleep(1)
 
 
+# ─── GITHUB ISSUE POLLING ─────────────────────────────────────────────────────
+@tasks.loop(minutes=5)
+async def poll_github_issues():
+    """Post new and closed issues to #sprint-board."""
+    now_iso = datetime.datetime.now(pytz.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    # First run — just set the watermark, don't flood the channel
+    if not state.get("last_issue_check"):
+        state["last_issue_check"] = now_iso
+        save_state(state)
+        return
+
+    since    = state["last_issue_check"]
+    issues   = await get_issues_since(since)
+    state["last_issue_check"] = now_iso
+    save_state(state)
+
+    if not issues:
+        return
+
+    for guild in bot.guilds:
+        ch = get_channel(guild, "sprint-board")
+        if not ch:
+            continue
+
+        for issue in issues:
+            # Skip pull requests (GitHub Issues API also returns PRs)
+            if issue.get("pull_request"):
+                continue
+
+            num    = issue.get("number")
+            title  = issue.get("title", "")
+            url    = issue.get("html_url", "")
+            user   = issue.get("user", {}).get("login", "unknown")
+            status = issue.get("state", "open")
+
+            assignees = ", ".join(
+                a["login"] for a in issue.get("assignees", [])
+            ) or "unassigned"
+            labels = " ".join(
+                f"`{l['name']}`" for l in issue.get("labels", [])
+            )
+
+            if status == "open":
+                await ch.send(
+                    f"📋 **Issue #{num} opened**\n"
+                    f"**Title:** {title}\n"
+                    f"**Author:** {user}\n"
+                    f"**Assigned:** {assignees}\n"
+                    f"{('**Labels:** ' + labels + chr(10)) if labels else ''}"
+                    f"→ {url}"
+                )
+            elif status == "closed":
+                closed_by_raw = issue.get("closed_by") or {}
+                closed_by     = closed_by_raw.get("login", "unknown") if isinstance(closed_by_raw, dict) else "unknown"
+                await ch.send(
+                    f"✅ **Issue #{num} closed** by **{closed_by}**\n"
+                    f"**Title:** {title}\n"
+                    f"→ {url}"
+                )
+
+            await asyncio.sleep(0.5)
+
+
 # ─── BOT EVENTS ───────────────────────────────────────────────────────────────
 @bot.event
 async def on_ready():
@@ -913,10 +1059,13 @@ async def on_ready():
         daily_digest.start()
     if not poll_github_prs.is_running():
         poll_github_prs.start()
+    if not poll_github_issues.is_running():
+        poll_github_issues.start()
 
     print("[ASTRA Bot] ✅ All systems running.")
     print(f"  → Daily digest: 9AM CDT")
     print(f"  → PR polling: every 5 minutes")
+    print(f"  → Issue polling: every 5 minutes → #sprint-board")
     print(f"  → Incident auto-thread: active")
     print(f"  → Sprint board: /task and /sprint commands ready")
 
