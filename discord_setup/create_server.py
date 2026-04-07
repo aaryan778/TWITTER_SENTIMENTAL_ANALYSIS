@@ -1,12 +1,15 @@
 """
 ASTRA Discord Server Creation Script
 =====================================
-Run this ONCE to create the full ASTRA server with all categories,
-channels, voice rooms, and pinned channel guides.
+Run this ONCE after:
+  1. Creating the server manually on Discord
+  2. Inviting the bot to the server
+  3. Copying the Server ID (right-click server → Copy Server ID)
 
 Usage:
     pip install -r requirements.txt
     export DISCORD_BOT_TOKEN=your_token_here
+    export DISCORD_GUILD_ID=your_server_id_here
     python create_server.py
 """
 
@@ -14,7 +17,8 @@ import discord
 import asyncio
 import os
 
-BOT_TOKEN = os.environ.get("DISCORD_BOT_TOKEN", "")
+BOT_TOKEN  = os.environ.get("DISCORD_BOT_TOKEN", "")
+GUILD_ID   = int(os.environ.get("DISCORD_GUILD_ID", "0"))
 SERVER_NAME = "ASTRA | AI-SRE Platform"
 
 # ─── CHANNEL STRUCTURE ────────────────────────────────────────────────────────
@@ -369,14 +373,18 @@ async def pin_message(channel, content):
 
 
 async def create_astra_server():
-    print(f"\n[ASTRA] Creating server: '{SERVER_NAME}' ...")
-    guild = await client.create_guild(name=SERVER_NAME)
-    await asyncio.sleep(3)
+    guild = client.get_guild(GUILD_ID)
+    if not guild:
+        print(f"[ERROR] Could not find server with ID {GUILD_ID}")
+        print("  Make sure the bot is invited to the server and DISCORD_GUILD_ID is correct.")
+        await client.close()
+        return
 
-    guild = client.get_guild(guild.id)
+    print(f"\n[ASTRA] Found server: '{guild.name}' (ID: {guild.id})")
+    print("[ASTRA] Setting up ASTRA channel structure ...")
 
     # Delete default channels
-    print("[ASTRA] Removing default channels ...")
+    print("[ASTRA] Removing existing channels ...")
     for channel in guild.channels:
         try:
             await channel.delete()
@@ -463,7 +471,12 @@ async def on_ready():
 
 if __name__ == "__main__":
     if not BOT_TOKEN:
-        print("[ERROR] Set your bot token first:")
+        print("[ERROR] Missing DISCORD_BOT_TOKEN")
         print("  export DISCORD_BOT_TOKEN=your_token_here")
+    elif not GUILD_ID:
+        print("[ERROR] Missing DISCORD_GUILD_ID")
+        print("  export DISCORD_GUILD_ID=your_server_id_here")
+        print("  (Right-click your server in Discord → Copy Server ID)")
+        print("  (Requires Developer Mode: Settings → Advanced → Developer Mode)")
     else:
         client.run(BOT_TOKEN)
